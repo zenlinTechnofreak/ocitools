@@ -12,30 +12,29 @@ const bundleCacheDir = "./bundles"
 
 var runtimetestFlags = []cli.Flag{
 	cli.StringFlag{Name: "runtime, r", Usage: "runtime to be tested"},
-	cli.StringFlag{Name: "output, o", Usage: "output format, \n" +
-		"-o=all: ouput sucessful details and statistics, -o=err-only: ouput failure details and statistics"},
-	cli.BoolFlag{Name: "debug, d", Usage: "switch of debug mode, defaults to false, with '--debug' to enable debug mode"},
+	cli.StringFlag{Name: "level, l", Usage: "-l=all: output all the details and statistics; -l=err-only: output failure details and statistics"},
+	cli.BoolFlag{Name: "debug, d", Usage: "switch of debug mode, default to 'false', with '--debug' to enable debug mode"},
 }
 
 var runtimeTestCommand = cli.Command{
 	Name:  "runtimetest",
-	Usage: "test if a runtime is comlpliant to oci specs",
+	Usage: "test if a runtime is compliant to OCI Runtime Specification",
 	Flags: runtimetestFlags,
 	Action: func(context *cli.Context) {
 		if os.Geteuid() != 0 {
-			logrus.Fatalln("runtimetest should be run as root")
+			logrus.Fatalln("Should be run as 'root'")
 		}
 		var runtime string
 		if runtime = context.String("runtime"); runtime != "runc" {
-			logrus.Fatalf("runtimetest does not support %v\n", runtime)
+			logrus.Fatalf("'%v' is currently not supported", runtime)
 		}
-		output := context.String("output")
+		level := context.String("level")
 		setDebugMode(context.Bool("debug"))
 
 		units.LoadTestUnits("./cases.conf")
 
 		if err := os.MkdirAll(bundleCacheDir, os.ModePerm); err != nil {
-			logrus.Printf("create cache dir for bundle cases err: %v\ns", bundleCacheDir)
+			logrus.Printf("Failed to create cache dir: %v", bundleCacheDir)
 			return
 		}
 
@@ -46,15 +45,11 @@ var runtimeTestCommand = cli.Command{
 		units.OutputResult(output)
 
 		if err := os.RemoveAll(bundleCacheDir); err != nil {
-			logrus.Fatalf("remove cache dir of bundles %v err: %v\n", bundleCacheDir, err)
-		}
-
-		if err := os.Remove("./runtime.json"); err != nil {
-			logrus.Fatalf("remove ./runtime.json err: %v\n", err)
+			logrus.Fatalf("Failed to remove cache dir of bundles '%v': %v\n", bundleCacheDir, err)
 		}
 
 		if err := os.Remove("./config.json"); err != nil {
-			logrus.Fatalf("remove ./config.json err: %v\n", err)
+			logrus.Fatalf("Failed to remove ./config.json: %v\n", err)
 		}
 	},
 }
@@ -68,9 +63,9 @@ func setDebugMode(debug bool) {
 }
 
 func testTask(unit *units.TestUnit, runtime string) {
-	logrus.Debugf("test bundle name: %v, Test args: %v\n", unit.Name, unit.Args)
+	logrus.Debugf("Testing bundle: %v, Testing args: %v\n", unit.Name, unit.Args)
 	if err := unit.SetRuntime(runtime); err != nil {
-		logrus.Fatalf("failed to setup runtime %s , error: %v\n", runtime, err)
+		logrus.Fatalf("Failed to setup runtime '%s': %v\n", runtime, err)
 	} else {
 		unit.Run()
 	}
