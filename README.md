@@ -73,15 +73,14 @@ Testing OCI runtimes
 ```
 # ocitools runtimetest --help
 NAME:
-   runtimetest - test if a runtime is comlpliant to oci specs
+   runtimetest - test if a runtime is compliant to OCI Runtime Specification
 
 USAGE:
    command runtimetest [command options] [arguments...]
 
 OPTIONS:
    --runtime, -r        runtime to be tested
-   --output, -o         output format,
--o=all: ouput sucessful details and statistics, -o=err-only: ouput failure details and statistics
-   --debug, -d  switch of debug mode, defaults to false, with '--debug' to enable debug mode
+   --level, -l		-l=all: output all the details and statistics; -l=err-only: output failure details and statistics
+   --debug, -d  switch of debug mode, default to 'false', with '--debug' to enable debug mode
 ```    
 

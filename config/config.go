@@ -21,7 +21,7 @@ var (
 func init() {
 	f, err := os.Open(configPath)
 	if err != nil {
-		logrus.Fatalf("open file %v error %v", configPath, err)
+		logrus.Fatalf("Failed to open file '%v': %v", configPath, err)
 	}
 	defer f.Close()
 

@@ -63,32 +63,32 @@ func NewTestUnit(name string, args string, desc string) *TestUnit {
 	return tu
 }
 
-// OutputResult output results, ouput value: err-only or all
-func OutputResult(output string) {
-	if output != "err-only" && output != "all" {
-		logrus.Fatalf("eerror output mode: %v\n", output)
+// OutputResult output results, output level: err-only or all
+func OutputResult(level string) {
+	if level != "err-only" && level != "all" {
+		logrus.Fatalf("Wrong output level: %v", output)
 	}
 
 	SuccessCount := 0
 	failCount := 0
 
-	// Can not be merged into on range, because output should be devided into two parts, successful and
-	// failure
-	if output == "all" {
-		logrus.Println("successful Details:")
+	// Can not be merged into on range, because output should be devided into two parts,
+	// successful part and failure part
+	if level == "all" {
+		logrus.Println("Successful Details:")
 		echoDividing()
 	}
 
 	for _, tu := range *Units {
 		if tu.Result == pass {
 			SuccessCount++
-			if output == "all" {
+			if level == "all" {
 				tu.EchoSUnit()
 			}
 		}
 	}
 
-	logrus.Println("failure Details:")
+	logrus.Println("Failure Details:")
 	echoDividing()
 
 	for _, tu := range *Units {
@@ -99,7 +99,7 @@ func OutputResult(output string) {
 	}
 
 	echoDividing()
-	logrus.Printf("statistics:  %v bundles success, %v bundles failed\n", SuccessCount, failCount)
+	logrus.Printf("Statistics:  %v bundles success, %v bundles failed\n", SuccessCount, failCount)
 }
 
 // EchoSUnit echo sucessful test units after validation
