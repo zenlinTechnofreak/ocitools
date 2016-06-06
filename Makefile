@@ -1,3 +1,6 @@
+PREFIX ?= $(DESTDIR)/usr
+BINDIR ?= $(DESTDIR)/usr/bin
+
 BUILDTAGS=
 export GOPATH:=$(CURDIR)/Godeps/_workspace:$(GOPATH)
 
@@ -5,36 +8,22 @@ all:
 	go build -tags "$(BUILDTAGS)" -o ocitools .
 	go build -tags "$(BUILDTAGS)" -o runtimetest ./cmd/runtimetest
 
-install:
-	cp ocitools /usr/local/bin/ocitools
+.PHONY: man
+man:
+	go-md2man -in "man/ocitools.1.md" -out "ocitools.1"
+	go-md2man -in "man/ocitools-generate.1.md" -out "ocitools-generate.1"
+	go-md2man -in "man/ocitools-validate.1.md" -out "ocitools-validate.1"
 
-rootfs.tar.gz: rootfs/bin/echo
-	tar -czf $@ -C rootfs .
-
-rootfs/bin/busybox: downloads/stage3-amd64-current.tar.bz2 rootfs-files
-	gpg --verify $<.DIGESTS.asc
-	(cd downloads && \
-		grep -A1 '^# SHA512 HASH' stage3-amd64-current.tar.bz2.DIGESTS.asc | \
-		grep -v '^--' | \
-		sha512sum -c)
-	sudo rm -rf rootfs
-	sudo mkdir rootfs
-	sudo tar -xvf downloads/stage3-amd64-current.tar.bz2 -C rootfs \
-		--no-recursion --wildcards $$(< rootfs-files)
-	sudo touch $@
-
-rootfs/bin/echo: rootfs/bin/busybox
-	sudo sh -c 'for COMMAND in $$($< --list); do \
-		ln -rs $< "rootfs/bin/$${COMMAND}"; \
-	done'
-
-downloads/stage3-amd64-current.tar.bz2: get-stage3.sh
-	./$<
-	touch downloads/stage3-amd64-*.tar.bz2
+install: man
+	install -d -m 755 $(BINDIR)
+	install -m 755 ocitools $(BINDIR)
+	install -d -m 755 $(PREFIX)/share/man/man1
+	install -m 644 *.1 $(PREFIX)/share/man/man1
+	install -d -m 755 $(PREFIX)/share/bash-completion/completions
+	install -m 644 completions/bash/ocitools $(PREFIX)/share/bash-completion/completions
 
 clean:
-	rm -f ocitools runtimetest downloads/*
-	sudo rm -rf rootfs
+	rm -f ocitools runtimetest
 
 .PHONY: test .gofmt .govet .golint
 
