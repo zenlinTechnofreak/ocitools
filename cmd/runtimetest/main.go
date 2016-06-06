@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -11,41 +12,29 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/opencontainers/specs"
+	rspec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/syndtr/gocapability/capability"
 )
 
-type validation func(*specs.LinuxSpec, *specs.LinuxRuntimeSpec) error
+type validation func(*rspec.Spec) error
 
-func loadSpecConfig() (spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec, err error) {
+func loadSpecConfig() (spec *rspec.Spec, err error) {
 	cPath := "config.json"
 	cf, err := os.Open(cPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("config.json not found")
+			return nil, fmt.Errorf("config.json not found")
 		}
 	}
 	defer cf.Close()
 
-	rPath := "runtime.json"
-	rf, err := os.Open(rPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("runtime.json not found")
-		}
-	}
-	defer rf.Close()
-
 	if err = json.NewDecoder(cf).Decode(&spec); err != nil {
 		return
 	}
-	if err = json.NewDecoder(rf).Decode(&rspec); err != nil {
-		return
-	}
-	return spec, rspec, nil
+	return spec, nil
 }
 
-func validateProcess(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error {
+func validateProcess(spec *rspec.Spec) error {
 	fmt.Println("validating container process")
 	uid := os.Getuid()
 	if uint32(uid) != spec.Process.User.UID {
@@ -110,27 +99,13 @@ func validateProcess(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error
 	return nil
 }
 
-func validateCapabilities(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error {
+func validateCapabilities(spec *rspec.Spec) error {
 	fmt.Println("validating capabilities")
-	capabilityMap := make(map[string]capability.Cap)
-	expectedCaps := make(map[capability.Cap]bool)
+
 	last := capability.CAP_LAST_CAP
 	// workaround for RHEL6 which has no /proc/sys/kernel/cap_last_cap
 	if last == capability.Cap(63) {
 		last = capability.CAP_BLOCK_SUSPEND
-	}
-	for _, cap := range capability.List() {
-		if cap > last {
-			continue
-		}
-		capKey := fmt.Sprintf("CAP_%s", strings.ToUpper(cap.String()))
-		capabilityMap[capKey] = cap
-		expectedCaps[cap] = false
-	}
-
-	for _, ec := range spec.Linux.Capabilities {
-		cap := capabilityMap[ec]
-		expectedCaps[cap] = true
 	}
 
 	processCaps, err := capability.NewPid(1)
@@ -138,8 +113,18 @@ func validateCapabilities(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) 
 		return err
 	}
 
+	expectedCaps := make(map[string]bool)
+	for _, ec := range spec.Process.Capabilities {
+		expectedCaps[ec] = true
+	}
+
 	for _, cap := range capability.List() {
-		expectedSet := expectedCaps[cap]
+		if cap > last {
+			continue
+		}
+
+		capKey := fmt.Sprintf("CAP_%s", strings.ToUpper(cap.String()))
+		expectedSet := expectedCaps[capKey]
 		actuallySet := processCaps.Get(capability.EFFECTIVE, cap)
 		if expectedSet != actuallySet {
 			if expectedSet {
@@ -152,21 +137,21 @@ func validateCapabilities(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) 
 	return nil
 }
 
-func validateHostname(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error {
+func validateHostname(spec *rspec.Spec) error {
 	fmt.Println("validating hostname")
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
-	if hostname != spec.Hostname {
+	if spec.Hostname != "" && hostname != spec.Hostname {
 		return fmt.Errorf("Hostname expected: %v, actual: %v", spec.Hostname, hostname)
 	}
 	return nil
 }
 
-func validateRlimits(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error {
+func validateRlimits(spec *rspec.Spec) error {
 	fmt.Println("validating rlimits")
-	for _, r := range rspec.Linux.Rlimits {
+	for _, r := range spec.Process.Rlimits {
 		rl, err := strToRlimit(r.Type)
 		if err != nil {
 			return err
@@ -187,9 +172,9 @@ func validateRlimits(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error
 	return nil
 }
 
-func validateSysctls(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error {
+func validateSysctls(spec *rspec.Spec) error {
 	fmt.Println("validating sysctls")
-	for k, v := range rspec.Linux.Sysctl {
+	for k, v := range spec.Linux.Sysctl {
 		keyPath := filepath.Join("/proc/sys", strings.Replace(k, ".", "/", -1))
 		vBytes, err := ioutil.ReadFile(keyPath)
 		if err != nil {
@@ -203,23 +188,81 @@ func validateSysctls(spec *specs.LinuxSpec, rspec *specs.LinuxRuntimeSpec) error
 	return nil
 }
 
+func testWriteAccess(path string) error {
+	tmpfile, err := ioutil.TempFile(path, "Test")
+	if err != nil {
+		return err
+	}
+
+	tmpfile.Close()
+	os.RemoveAll(filepath.Join(path, tmpfile.Name()))
+
+	return nil
+}
+
+func validateRootFS(spec *rspec.Spec) error {
+	fmt.Println("validating root")
+	if spec.Root.Readonly {
+		err := testWriteAccess("/")
+		if err == nil {
+			return fmt.Errorf("Rootfs should be readonly")
+		}
+	}
+
+	return nil
+}
+
+func validateMaskedPaths(spec *rspec.Spec) error {
+	fmt.Println("validating maskedPaths")
+	for _, maskedPath := range spec.Linux.MaskedPaths {
+		f, err := os.Open(maskedPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		b := make([]byte, 1)
+		_, err = f.Read(b)
+		if err != io.EOF {
+			return fmt.Errorf("%v should not be readable", maskedPath)
+		}
+	}
+	return nil
+}
+
+func validateROPaths(spec *rspec.Spec) error {
+	fmt.Println("validating readonlyPaths")
+	for _, v := range spec.Linux.ReadonlyPaths {
+		err := testWriteAccess(v)
+		if err == nil {
+			return fmt.Errorf("%v should be readonly", v)
+		}
+	}
+	return nil
+}
+
 func main() {
-	spec, rspec, err := loadSpecConfig()
+	spec, err := loadSpecConfig()
 	if err != nil {
 		logrus.Fatalf("Failed to load configuration: %q", err)
 	}
 
 	validations := []validation{
+		validateRootFS,
 		validateProcess,
 		validateCapabilities,
 		validateHostname,
 		validateRlimits,
 		validateSysctls,
+		validateMaskedPaths,
+		validateROPaths,
 	}
 
+	ret := 0
+	defer os.Exit(ret)
 	for _, v := range validations {
-		if err := v(spec, rspec); err != nil {
-			logrus.Fatalf("Validation failed: %q", err)
+		if err := v(spec); err != nil {
+			logrus.Errorf("Validation failed: %q", err)
+			ret = 1
 		}
 	}
 }
