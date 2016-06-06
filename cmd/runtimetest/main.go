@@ -257,9 +257,12 @@ func main() {
 		validateROPaths,
 	}
 
+	ret := 0
+	defer os.Exit(ret)
 	for _, v := range validations {
 		if err := v(spec); err != nil {
-			logrus.Fatalf("Validation failed: %q", err)
+			logrus.Errorf("Validation failed: %q", err)
+			ret = 1
 		}
 	}
 }
